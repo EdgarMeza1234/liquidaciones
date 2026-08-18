@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Liquidaciones de Mineral</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ LOGIN ============ -->
+  <div v-if="!authenticated" class="login-page">
+    <div class="login-card">
+      <div class="login-logo">&#9938;</div>
+      <h1 class="login-title">LiquiMineral</h1>
+      <p class="login-sub">Sistema de Liquidaciones de Mineral</p>
+      <form @submit.prevent="doLogin" class="login-form">
+        <div class="login-field">
+          <label>Usuario</label>
+          <input v-model="loginForm.user" type="text" placeholder="admin" autofocus autocomplete="username" />
+        </div>
+        <div class="login-field">
+          <label>Contraseña</label>
+          <input v-model="loginForm.pass" type="password" placeholder="••••••••" autocomplete="current-password" />
+        </div>
+        <div class="login-error" v-if="loginError">{{ loginError }}</div>
+        <button type="submit" class="btn btn-primary btn-lg login-btn" :disabled="loggingIn">
+          {{ loggingIn ? 'Entrando...' : 'Iniciar Sesion' }}
+        </button>
+      </form>
+      <div class="login-footer">Potosi - Bolivia</div>
+    </div>
+  </div>
+
+  <!-- ============ APP (autenticado) ============ -->
+  <template v-if="authenticated">
+  <aside class="sidebar" :class="{ collapsed: sb }">
+    <div class="sidebar-header">
+      <div class="logo"><span class="logo-icon">&#9938;</span><span class="logo-text" v-show="!sb">LiquiMineral</span></div>
+      <button class="sidebar-toggle" @click="sb = !sb">&#9776;</button>
+    </div>
+    <nav class="sidebar-nav">
+      <a :class="{active:v==='dash'}" @click="go('dash')"><span class="nav-icon">&#9632;</span><span v-show="!sb">Dashboard</span></a>
+      <a :class="{active:v==='nueva'}" @click="go('nueva')"><span class="nav-icon">&#10010;</span><span v-show="!sb">Nueva Liquidacion</span></a>
+      <a :class="{active:v==='hist'}" @click="go('hist')"><span class="nav-icon">&#9776;</span><span v-show="!sb">Historial</span></a>
+      <a :class="{active:v==='cfg'}" @click="go('cfg')"><span class="nav-icon">&#9881;</span><span v-show="!sb">Configuracion</span></a>
+    </nav>
+    <div class="sidebar-footer" v-show="!sb">
+      <small>{{ currentUser }}</small><br/>
+      <a class="logout-link" @click="doLogout" title="Cerrar sesion">&#10140; Salir</a>
+    </div>
+  </aside>
+
+  <main class="main-content">
+
+    <!-- ============ DASHBOARD ============ -->
+    <section v-if="v==='dash'" class="page">
+      <div class="page-header"><h1>Dashboard</h1><p class="subtitle">Resumen de liquidaciones de compra de mineral</p></div>
+      <div class="stats-grid">
+        <div class="stat-card stat-blue"><div class="stat-icon">&#128202;</div><div class="stat-info"><span class="stat-value">{{ res.total }}</span><span class="stat-label">Total Liquidaciones</span></div></div>
+        <div class="stat-card stat-green"><div class="stat-icon">&#128176;</div><div class="stat-info"><span class="stat-value">{{ fmtBs(res.pagable) }}</span><span class="stat-label">LIQUIDO PAGABLE (Bs)</span></div></div>
+        <div class="stat-card stat-amber"><div class="stat-icon">&#128200;</div><div class="stat-info"><span class="stat-value">{{ fmtBs(res.mineral) }}</span><span class="stat-label">VAL MIN BS Total</span></div></div>
+        <div class="stat-card stat-red"><div class="stat-icon">&#128203;</div><div class="stat-info"><span class="stat-value">{{ fmtBs(res.retenciones) }}</span><span class="stat-label">TOTAL RETENCION</span></div></div>
+      </div>
+      <div class="card" style="margin-top:1.5rem" v-if="historial.length">
+        <h3 style="margin-bottom:1rem">Ultimas Liquidaciones</h3>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead><tr><th>NUMERO DE LOTE</th><th>NOMBRE Y APELLIDO</th><th>FECHA DE ENTREGA</th><th>LIQUIDO PAGABLE [Bs]</th><th></th></tr></thead>
+            <tbody><tr v-for="l in historial.slice(0,5)" :key="l.id">
+              <td><span class="badge badge-blue">{{ l["NUMERO DE LOTE"] }}</span></td>
+              <td>{{ l["NOMBRE Y APELLIDO"] }}</td><td>{{ l["FECHA DE ENTREGA"] }}</td>
+              <td class="text-green fw-600">{{ fmtBs(l["LIQUIDO PAGABLE [Bs]"]) }} Bs</td>
+              <td><button class="btn btn-sm btn-outline" @click="ver(l)">Ver</button></td>
+            </tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ NUEVA LIQUIDACION (formulario tipo hoja Liquidaciones del Excel) ============ -->
+    <section v-if="v==='nueva'" class="page">
+      <div class="page-header"><h1>Nueva Liquidacion</h1><p class="subtitle">Formulario de registro - Hoja Liquidaciones</p></div>
+
+      <!-- FORMULARIO ESTILO EXCEL LIQUIDACIONES -->
+      <div class="card excel-form">
+        <div class="excel-title">TABLE DE LIQUIDACION [ZIN - PLATA]</div>
+
+        <div class="excel-body">
+          <!-- COLUMNA IZQUIERDA: DETALLE -->
+          <div class="excel-left">
+            <div class="excel-row"><span class="excel-label">NUMERO DE LOTE</span><span class="excel-sep">:</span><input v-model="f['NUMERO DE LOTE']" placeholder="CA-11" required /></div>
+            <div class="excel-row"><span class="excel-label">FECHA DE ENTREGA</span><span class="excel-sep">:</span><input v-model="f['FECHA DE ENTREGA']" type="date" required /></div>
+            <div class="excel-row"><span class="excel-label">FECHA DE PAGO</span><span class="excel-sep">:</span><input v-model="f['FECHA DE PAGO']" type="date" required /></div>
+            <div class="excel-row"><span class="excel-label">NOMBRE Y APELLIDO</span><span class="excel-sep">:</span><input v-model="f['NOMBRE Y APELLIDO']" placeholder="Nombre completo" required /></div>
+            <div class="excel-row"><span class="excel-label">PESO BRUTO</span><span class="excel-sep">:</span><input v-model.number="f['PESO BRUTO']" type="number" step="0.01" required /></div>
+            <div class="excel-row"><span class="excel-label">TARA</span><span class="excel-sep">:</span><input v-model.number="f['TARA']" type="number" step="0.01" required /></div>
+            <div class="excel-row"><span class="excel-label">PESO NETO</span><span class="excel-sep">:</span><span class="excel-readonly">{{ pesoNeto }}</span></div>
+
+            <div class="excel-row"><span class="excel-label">LEY DE [Pb]</span><span class="excel-sep">:</span>
+              <div class="excel-dual"><input v-model.number="f['PRECIO P/LEY [Pb]']" type="number" step="0.01" title="PRECIO P/LEY" placeholder="PRECIO" /><input v-model.number="f['LEY DE [Pb]']" type="number" step="0.01" title="LEY" placeholder="LEY" /></div>
+            </div>
+            <div class="excel-row"><span class="excel-label">LEY DE [Ag]</span><span class="excel-sep">:</span>
+              <div class="excel-dual"><input v-model.number="f['PRECIO P/LEY [Ag]']" type="number" step="0.01" title="PRECIO P/LEY" placeholder="PRECIO" /><input v-model.number="f['LEY DE [Ag]']" type="number" step="0.01" title="LEY" placeholder="LEY" /></div>
+            </div>
+            <div class="excel-row"><span class="excel-label">LEY DE [Zn]</span><span class="excel-sep">:</span>
+              <div class="excel-dual"><input v-model.number="f['PRECIO P/LEY [Zn]']" type="number" step="0.01" title="PRECIO P/LEY" placeholder="PRECIO" /><input v-model.number="f['LEY DE [Zn]']" type="number" step="0.01" title="LEY" placeholder="LEY" /></div>
+            </div>
+
+            <div class="excel-row"><span class="excel-label">H2O [%]</span><span class="excel-sep">:</span><input v-model.number="f['H2O (%)']" type="number" step="0.01" required /></div>
+            <div class="excel-row"><span class="excel-label">LEY (%)</span><span class="excel-sep">:</span><input v-model.number="f['LEY (%)']" type="number" step="0.01" required /></div>
+            <div class="excel-row"><span class="excel-label">PRECIO P/Tn [$us]</span><span class="excel-sep">:</span><span class="excel-readonly">{{ fmtN(precioTn) }}</span></div>
+            <div class="excel-row"><span class="excel-label">ANTICIPOS</span><span class="excel-sep">:</span><input v-model.number="f['ANTICIPOS']" type="number" step="0.01" /></div>
+
+            <div class="excel-row extra-row"><span class="excel-label">COOPERATIVA</span><span class="excel-sep">:</span><input v-model="f['COOPERATIVA']" /></div>
+            <div class="excel-row extra-row"><span class="excel-label">PRODUCTOR TIPO</span><span class="excel-sep">:</span><select v-model="f['PRODUCTOR TIPO']"><option>Particular</option><option>Cooperativa</option><option>Empresa</option></select></div>
+            <div class="excel-row extra-row"><span class="excel-label">TIPO CAMBIO</span><span class="excel-sep">:</span><input v-model.number="f['TIPO CAMBIO']" type="number" step="0.01" /></div>
+            <div class="excel-row extra-row"><span class="excel-label">TRANSPORTE</span><span class="excel-sep">:</span><input v-model.number="f['TRANSPORTE']" type="number" step="0.01" /></div>
+          </div>
+
+          <!-- COLUMNA DERECHA: PREVIEW -->
+          <div class="excel-right">
+            <div class="preview-mini" v-if="previewVal">
+              <h4> Vista Previa (Hoja Liquidacion)</h4>
+              <div class="pv-row"><span>TMNS:</span><span>{{ fmtN(previewVal.TMNS) }}</span></div>
+              <div class="pv-row"><span>KLS FINOS:</span><span>{{ fmtN(previewVal.KLS) }}</span></div>
+              <div class="pv-row"><span>LB FINAS:</span><span>{{ fmtN(previewVal.LB) }}</span></div>
+              <div class="pv-row"><span>$US/TMN:</span><span>{{ fmtN(previewVal.usTmn) }}</span></div>
+              <div class="pv-row"><span>VAL MIN $US:</span><span>{{ fmtN(previewVal.valUs) }}</span></div>
+              <div class="pv-row"><span>VAL MIN BS:</span><span class="text-amber">{{ fmtBs(previewVal.valBs) }} Bs</span></div>
+              <hr />
+              <h4>RETENCIONES (sobre VAL MIN BS)</h4>
+              <div class="pv-row dim" v-for="(ri,rn) in previewVal.retenciones" :key="rn">
+                <span>{{ rn }} ({{ ri.porcentaje }}%)</span><span class="text-red">- {{ fmtBs(ri.monto) }} Bs</span>
+              </div>
+              <div class="pv-row"><span>TOTAL RETENCION:</span><span class="text-red fw-600">{{ fmtBs(previewVal.totalRet) }} Bs</span></div>
+              <hr />
+              <div class="pv-row"><span>SUB TOTAL Bs.:</span><span>{{ fmtBs(previewVal.sub) }} Bs</span></div>
+              <div class="pv-row dim"><span>(-) ANTICIPOS:</span><span>{{ fmtBs(previewVal.antic) }} Bs</span></div>
+              <div class="pv-row dim"><span>(-) TRASNPORTE:</span><span>{{ fmtBs(previewVal.trans) }} Bs</span></div>
+              <div class="pv-row dim"><span>(-) PORCENTAJE:</span><span>{{ fmtBs(previewVal.porc) }} Bs</span></div>
+              <div class="pv-row dim"><span>(-) DIESEL Y TOPES:</span><span>{{ fmtBs(previewVal.diesel) }} Bs</span></div>
+              <hr />
+              <div class="pv-row pv-total"><span>LIQUIDO PAGABLE [Bs]</span><span class="text-green">{{ fmtBs(previewVal.liq) }} Bs</span></div>
+            </div>
+            <div v-else class="preview-empty">Complete los datos para ver la vista previa</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions" style="margin-top:1rem">
+        <button type="button" class="btn btn-outline" @click="go('dash')">Cancelar</button>
+        <button type="button" class="btn btn-primary btn-lg" @click="guardar">Guardar Liquidacion</button>
+      </div>
+    </section>
+
+    <!-- ============ HISTORIAL ============ -->
+    <section v-if="v==='hist'" class="page">
+      <div class="page-header"><h1>Historial de Liquidaciones</h1><p class="subtitle">Registro completo</p></div>
+      <div class="card">
+        <div class="toolbar">
+          <div class="search-box"><span class="search-icon">&#128269;</span><input v-model="busq" @input="cargarHistorial" placeholder="Buscar por lote, nombre o cooperativa..." /></div>
+          <div class="toolbar-actions">
+            <input v-model="fdesde" @change="cargarHistorial" type="date" class="input-sm" title="Desde" />
+            <input v-model="fhasta" @change="cargarHistorial" type="date" class="input-sm" title="Hasta" />
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead><tr>
+              <th>NUMERO DE LOTE</th><th>NOMBRE Y APELLIDO</th><th>COOPERATIVA</th>
+              <th>FECHA DE ENTREGA</th><th>TMNS</th><th>LEY DE [Zn]</th>
+              <th>VAL MIN BS</th><th>LIQUIDO PAGABLE [Bs]</th><th>Acciones</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="l in histFiltrado" :key="l.id">
+                <td><span class="badge badge-blue">{{ l["NUMERO DE LOTE"] }}</span></td>
+                <td>{{ l["NOMBRE Y APELLIDO"] }}</td><td>{{ l["COOPERATIVA"] }}</td>
+                <td>{{ l["FECHA DE ENTREGA"] }}</td>
+                <td>{{ fmtN(l["TMNS"]) }}</td><td>{{ l["LEY DE [Zn]"] }}%</td>
+                <td>{{ fmtBs(l["VAL MIN BS"]) }} Bs</td>
+                <td class="fw-600" :class="(l['LIQUIDO PAGABLE [Bs]']||0)>=0?'text-green':'text-red'">{{ fmtBs(l["LIQUIDO PAGABLE [Bs]"]) }} Bs</td>
+                <td class="actions-cell">
+                  <button class="btn btn-sm btn-outline" @click="ver(l)" title="Ver detalle">&#128065;</button>
+                  <button class="btn btn-sm btn-outline" @click="imprimir(l)" title="Imprimir">&#128424;</button>
+                  <button class="btn btn-sm btn-outline btn-red" @click="eliminar(l)" title="Eliminar">&#128465;</button>
+                </td>
+              </tr>
+              <tr v-if="!histFiltrado.length"><td colspan="9" class="text-center text-muted" style="padding:2rem">No se encontraron liquidaciones</td></tr>
+            </tbody>
+            <tfoot v-if="histFiltrado.length"><tr class="total-row">
+              <td colspan="4"></td><td class="fw-600">TOTALES</td><td></td>
+              <td class="fw-600">{{ fmtBs(totH.valor) }} Bs</td>
+              <td class="fw-600 text-green">{{ fmtBs(totH.pagable) }} Bs</td><td></td>
+            </tr></tfoot>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CONFIG ============ -->
+    <section v-if="v==='cfg'" class="page">
+      <div class="page-header"><h1>Configuracion</h1><p class="subtitle">Parametros del sistema</p></div>
+      <div class="config-layout">
+        <div class="card form-section" style="border-left-color:var(--primary)">
+          <h3 class="section-title"><span class="dot dot-blue"></span> Parametros</h3>
+          <div class="form-grid">
+            <div class="form-group"><label>TC OFICIAL</label><input v-model.number="cfgF.TC_OFICIAL" type="number" step="0.01" /></div>
+            <div class="form-group"><label>TRANSPORTE</label><input v-model.number="cfgF.TRANSPORTE" type="number" step="0.01" /></div>
+            <div class="form-group"><label>PORCENTAJE (%)</label><input v-model.number="cfgF.PORCENTAJE" type="number" step="0.1" /></div>
+            <div class="form-group"><label>DIESEL BASE</label><input v-model.number="cfgF.DIESEL_BASE" type="number" step="0.01" /></div>
+            <div class="form-group"><label>DIESEL BARRILES</label><input v-model.number="cfgF.DIESEL_BARRILES" type="number" /></div>
+            <div class="form-group"><label>DIESEL PRECIO BARRIL</label><input v-model.number="cfgF.DIESEL_PRECIO_BARRIL" type="number" step="0.01" /></div>
+            <div class="form-group"><label>FACTOR LB</label><input v-model.number="cfgF.FACTOR_LB" type="number" step="0.0000001" /></div>
+          </div>
+        </div>
+        <div class="card form-section" style="border-left-color:var(--red)">
+          <h3 class="section-title"><span class="dot dot-red"></span> RETENCIONES (%)</h3>
+          <div class="form-grid">
+            <div class="form-group" v-for="(val,key) in cfgF.retenciones" :key="key"><label>{{ key }}</label><input v-model.number="cfgF.retenciones[key]" type="number" step="0.1" /></div>
+          </div>
+        </div>
+        <div class="form-actions"><button class="btn btn-primary btn-lg" @click="guardarCfg">Guardar</button></div>
+      </div>
+    </section>
+
+    <!-- ============ MODAL DETALLE ============ -->
+    <div class="modal-overlay" v-if="modal" @click.self="modal=null">
+      <div class="modal">
+        <div class="modal-header"><h2>Detalle de Liquidacion</h2><button class="modal-close" @click="modal=null">&times;</button></div>
+        <div class="modal-body" v-if="modal">
+          <div class="detail-header">
+            <span class="badge badge-blue fs-1">{{ modal["NUMERO DE LOTE"] }}</span>
+            <span class="detail-name">{{ modal["NOMBRE Y APELLIDO"] }}</span>
+            <span class="detail-coop">{{ modal["COOPERATIVA"] }}</span>
+          </div>
+          <div class="detail-grid">
+            <div class="detail-section"><h4>Fechas</h4>
+              <p><strong>FECHA DE ENTREGA:</strong> {{ modal["FECHA DE ENTREGA"] }}</p>
+              <p><strong>FECHA DE PAGO:</strong> {{ modal["FECHA DE PAGO"] }}</p>
+            </div>
+            <div class="detail-section"><h4>Pesos</h4>
+              <p><strong>PESO BRUTO:</strong> {{ fmtN(modal["PESO BRUTO"]) }}</p>
+              <p><strong>TARA:</strong> {{ fmtN(modal["TARA"]) }}</p>
+              <p><strong>PESO NETO:</strong> {{ fmtN(modal["PESO NETO"]) }}</p>
+              <p><strong>H2O (%):</strong> {{ modal["H2O (%)"] }}</p>
+              <p><strong>TMNS:</strong> {{ fmtN(modal["TMNS"]) }}</p>
+            </div>
+            <div class="detail-section"><h4>Leyes</h4>
+              <p><strong>LEY DE [Pb]:</strong> {{ modal["LEY DE [Pb]"] }} <span class="dim">(P/LEY: {{ modal["PRECIO P/LEY [Pb]"] }})</span></p>
+              <p><strong>LEY DE [Ag]:</strong> {{ modal["LEY DE [Ag]"] }} <span class="dim">(P/LEY: {{ modal["PRECIO P/LEY [Ag]"] }})</span></p>
+              <p><strong>LEY DE [Zn]:</strong> {{ modal["LEY DE [Zn]"] }} <span class="dim">(P/LEY: {{ modal["PRECIO P/LEY [Zn]"] }})</span></p>
+              <p><strong>LEY (%):</strong> {{ modal["LEY (%)"] }}</p>
+            </div>
+            <div class="detail-section"><h4>Valores</h4>
+              <p><strong>KLS FINOS:</strong> {{ fmtN(modal["KLS FINOS"]) }}</p>
+              <p><strong>LB FINAS:</strong> {{ fmtN(modal["LB FINAS"]) }}</p>
+              <p><strong>PRECIO P/Tn:</strong> ${{ fmtN(modal["PRECIO P/Tn [$us]"]) }}</p>
+              <p><strong>TC Oficial:</strong> {{ modal["TC OFICIAL"] }}</p>
+              <p><strong>Tipo Cambio:</strong> {{ modal["TIPO CAMBIO"] }}</p>
+            </div>
+          </div>
+          <div class="detail-values">
+            <div class="detail-row highlight-amber"><span>VAL MIN $US</span><span>${{ fmtN(modal["VAL MIN $US"]) }}</span></div>
+            <div class="detail-row highlight-amber"><span>VAL MIN BS</span><span>{{ fmtBs(modal["VAL MIN BS"]) }} Bs</span></div>
+          </div>
+          <h4 style="margin:1rem 0 0.5rem">RETENCIONES</h4>
+          <div class="detail-values">
+            <div class="detail-row" v-for="(ri,rn) in modal['RETENCIONES']" :key="rn">
+              <span>{{ rn }} ({{ ri.porcentaje }}%)</span><span class="text-red">- {{ fmtBs(ri.monto) }} Bs</span>
+            </div>
+            <div class="detail-row highlight-red"><span>TOTAL RETENCION</span><span>- {{ fmtBs(modal["TOTAL RETENCION"]) }} Bs</span></div>
+          </div>
+          <div class="detail-values">
+            <div class="detail-row"><span>SUB TOTAL Bs.</span><span>{{ fmtBs(modal["SUB TOTAL Bs."]) }} Bs</span></div>
+            <div class="detail-row"><span>(-) ANTICIPOS</span><span>- {{ fmtBs(modal["ANTICIPOS"]) }} Bs</span></div>
+            <div class="detail-row"><span>(-) TRASNPORTE</span><span>- {{ fmtBs(modal["TRANSPORTE"]) }} Bs</span></div>
+            <div class="detail-row"><span>(-) PORCENTAJE</span><span>- {{ fmtBs(modal["PORCENTAJE"]) }} Bs</span></div>
+            <div class="detail-row"><span>(-) DIESEL Y TOPES</span><span>- {{ fmtBs(modal["DIESEL Y TOPES"]) }} Bs</span></div>
+          </div>
+          <div class="detail-total"><span>LIQUIDO PAGABLE [Bs]</span><span class="text-green">{{ fmtBs(modal["LIQUIDO PAGABLE [Bs]"]) }} Bs</span></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" @click="imprimir(modal)">&#128424; Imprimir</button>
+          <button class="btn btn-outline" @click="descTxt(modal.id)">&#128190; .txt</button>
+          <button class="btn btn-primary" @click="modal=null">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
+    <transition name="toast"><div class="toast" v-if="toast.show" :class="'toast-'+toast.type">{{ toast.message }}</div></transition>
+  </main>
+  </template>
+</div>
+<script src="js/app.js"></script>
+</body>
+</html>

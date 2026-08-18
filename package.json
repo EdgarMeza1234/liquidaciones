@@ -1,0 +1,15 @@
+{
+  "name": "liquidaciones-mineral",
+  "version": "1.0.0",
+  "description": "Sistema de Liquidaciones de Compra de Mineral",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^10.0.0"
+  }
+}

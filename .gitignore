@@ -1,0 +1,4 @@
+node_modules/
+data/liquidaciones.json
+data/config.json
+data/users.json
