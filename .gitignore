@@ -1,4 +1,8 @@
 node_modules/
 data/liquidaciones.json
+data/liquidaciones.json.bak
+data/liquidaciones.db
+data/liquidaciones.db-wal
+data/liquidaciones.db-shm
 data/config.json
 data/users.json
