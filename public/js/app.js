@@ -30,10 +30,12 @@ createApp({
       return r;
     }
 
+    const API = "api";
+
     async function checkAuth() {
       if (!token.value) { authenticated.value = false; return false; }
       try {
-        const r = await fetch("/api/verify", { headers: authHeaders() });
+        const r = await fetch(`${API}/verify`, { headers: authHeaders() });
         if (r.ok) { authenticated.value = true; return true; }
       } catch {}
       doLogout();
@@ -45,7 +47,7 @@ createApp({
       loggingIn.value = true;
       loginError.value = "";
       try {
-        const r = await fetch("/api/login", {
+        const r = await fetch(`${API}/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ user: loginForm.user, pass: loginForm.pass })
@@ -74,8 +76,8 @@ createApp({
       localStorage.removeItem("liq_user");
     }
 
-    function printUrl(id) { return `/api/liquidaciones/${id}/imprimir?token=${encodeURIComponent(token.value)}`; }
-    function txtUrl(id) { return `/api/liquidaciones/${id}/texto?token=${encodeURIComponent(token.value)}`; }
+    function printUrl(id) { return `${API}/liquidaciones/${id}/imprimir?token=${encodeURIComponent(token.value)}`; }
+    function txtUrl(id) { return `${API}/liquidaciones/${id}/texto?token=${encodeURIComponent(token.value)}`; }
 
     // ===================== APP =====================
     const res = reactive({ total: 0, pagable: 0, retenciones: 0, mineral: 0, productores: 0 });
@@ -153,16 +155,16 @@ createApp({
 
     function go(who) { v.value = who; if (who === "nueva") Object.assign(f, mkF()); if (who === "hist") cargarHistorial(); if (who === "cfg") cargarCfg(); if (who === "dash") cargarRes(); }
 
-    async function cargarRes() { try { Object.assign(res, await (await authFetch("/api/resumen")).json()); } catch(e){} }
+    async function cargarRes() { try { Object.assign(res, await (await authFetch(`${API}/resumen`)).json()); } catch(e){} }
     async function cargarCfg() {
-      try { const d = await (await authFetch("/api/config")).json(); Object.assign(cfgData, d); Object.assign(cfgF, JSON.parse(JSON.stringify(d))); } catch(e){}
+      try { const d = await (await authFetch(`${API}/config`)).json(); Object.assign(cfgData, d); Object.assign(cfgF, JSON.parse(JSON.stringify(d))); } catch(e){}
     }
     async function cargarHistorial() {
-      try { historial.value = await (await authFetch("/api/liquidaciones")).json(); await cargarRes(); } catch(e){}
+      try { historial.value = await (await authFetch(`${API}/liquidaciones`)).json(); await cargarRes(); } catch(e){}
     }
     async function guardar() {
       try {
-        const r = await authFetch("/api/liquidaciones", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({...f}) });
+        const r = await authFetch(`${API}/liquidaciones`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({...f}) });
         if (!r.ok) throw 0;
         const res = await r.json();
         showToast("Liquidacion guardada correctamente");
@@ -172,13 +174,13 @@ createApp({
     }
     async function eliminar(l) {
       if (!confirm(`Eliminar lote ${l["NUMERO DE LOTE"]} (${l["NOMBRE Y APELLIDO"]})?`)) return;
-      try { await authFetch(`/api/liquidaciones/${l.id}`, {method:"DELETE"}); showToast("Eliminada"); await cargarHistorial(); } catch(e) { showToast("Error", "error"); }
+      try { await authFetch(`${API}/liquidaciones/${l.id}`, {method:"DELETE"}); showToast("Eliminada"); await cargarHistorial(); } catch(e) { showToast("Error", "error"); }
     }
     function ver(l) { modal.value = l; }
     function imprimir(l) { window.open(printUrl(l.id), "_blank"); }
     function descTxt(id) { window.open(txtUrl(id), "_blank"); }
     async function guardarCfg() {
-      try { await authFetch("/api/config", { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...cfgF}) }); Object.assign(cfgData, JSON.parse(JSON.stringify(cfgF))); showToast("Configuracion guardada"); } catch(e) { showToast("Error", "error"); }
+      try { await authFetch(`${API}/config`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...cfgF}) }); Object.assign(cfgData, JSON.parse(JSON.stringify(cfgF))); showToast("Configuracion guardada"); } catch(e) { showToast("Error", "error"); }
     }
 
     onMounted(async () => {
