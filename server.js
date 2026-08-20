@@ -2,7 +2,6 @@ const express = require("express");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const jwt = require("jsonwebtoken");
-const Database = require("better-sqlite3");
 const fs = require("fs");
 
 const app = express();
@@ -12,49 +11,36 @@ const JWT_SECRET = process.env.JWT_SECRET || "liq-secret-2024-potosi";
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// ===================== SQLITE =====================
+// ===================== JSON STORAGE =====================
 const DATA_DIR = path.join(__dirname, "data");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const db = new Database(path.join(DATA_DIR, "liquidaciones.db"));
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+const USERS_FILE = path.join(DATA_DIR, "users.json");
+const CONFIG_FILE = path.join(DATA_DIR, "config.json");
+const LIQS_FILE = path.join(DATA_DIR, "liquidaciones.json");
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user TEXT UNIQUE NOT NULL,
-    pass TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS config (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS liquidaciones (
-    id TEXT PRIMARY KEY,
-    data TEXT NOT NULL,
-    fecha_registro TEXT NOT NULL
-  );
-`);
+function loadJSON(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return fallback; }
+}
+function saveJSON(file, data) {
+  fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf-8");
+}
 
-// ===================== MIGRACION JSON -> SQLite =====================
-function migrarJSONSiEsNecesario() {
-  const userCount = db.prepare("SELECT COUNT(*) as c FROM users").get().c;
-  if (userCount > 0) return;
+let users = loadJSON(USERS_FILE, []);
+let config = loadJSON(CONFIG_FILE, null);
+let liquidaciones = loadJSON(LIQS_FILE, []);
 
-  console.log("  Migrando datos iniciales a SQLite...");
-
-  const insertUser = db.prepare("INSERT OR IGNORE INTO users (user, pass) VALUES (?, ?)");
-  const defaultUsers = [
+if (users.length === 0) {
+  users = [
     { user: "admin", pass: "admin123" },
     { user: "operador", pass: "operador123" }
   ];
-  const txUsers = db.transaction(() => {
-    for (const u of defaultUsers) insertUser.run(u.user, u.pass);
-  });
-  txUsers();
+  saveJSON(USERS_FILE, users);
+  console.log("  Usuarios por defecto creados: admin/admin123, operador/operador123");
+}
 
-  const DEFAULT_CONFIG = {
+if (!config) {
+  config = {
     retenciones: {
       "CAJA": 1.8, "COMIBOL": 1.0, "FEDECOMIN": 0.7,
       "WISTERMAN": 0.3, "FENCOMIN": 0.4, "REGALIA Zn-Ag": 6.0
@@ -63,59 +49,24 @@ function migrarJSONSiEsNecesario() {
     "DIESEL_BARRILES": 15, "DIESEL_PRECIO_BARRIL": 140,
     "FACTOR_LB": 2.2046223, "TC_OFICIAL": 6.96
   };
-
-  const insertCfg = db.prepare("INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)");
-  const txCfg = db.transaction(() => {
-    for (const [k, v] of Object.entries(DEFAULT_CONFIG)) {
-      insertCfg.run(k, JSON.stringify(v));
-    }
-  });
-  txCfg();
-
-  // Migrar liquidaciones.json si existe
-  const LIQS_JSON = path.join(DATA_DIR, "liquidaciones.json");
-  if (fs.existsSync(LIQS_JSON)) {
-    try {
-      const liquidaciones = JSON.parse(fs.readFileSync(LIQS_JSON, "utf-8"));
-      const insertLiq = db.prepare("INSERT OR IGNORE INTO liquidaciones (id, data, fecha_registro) VALUES (?, ?, ?)");
-      const txLiq = db.transaction(() => {
-        for (const l of liquidaciones) {
-          insertLiq.run(l.id || uuidv4(), JSON.stringify(l), l.fecha_registro || new Date().toISOString());
-        }
-      });
-      txLiq();
-      console.log(`  Migradas ${liquidaciones.length} liquidaciones desde JSON`);
-      fs.renameSync(LIQS_JSON, LIQS_JSON + ".bak");
-    } catch (e) { console.error("  Error migrando liquidaciones.json:", e.message); }
-  }
-
-  console.log("  Migracion completada.");
+  saveJSON(CONFIG_FILE, config);
+  console.log("  Configuracion por defecto creada.");
 }
 
-migrarJSONSiEsNecesario();
+if (liquidaciones.length === 0) {
+  const LIQS_JSON = path.join(DATA_DIR, "liquidaciones.json");
+  const LIQS_LEGACY = path.join(DATA_DIR, "liquidaciones.json.old");
+  if (fs.existsSync(LIQS_LEGACY)) {
+    try { liquidaciones = JSON.parse(fs.readFileSync(LIQS_LEGACY, "utf-8")); saveJSON(LIQS_FILE, liquidaciones); console.log(`  Migradas ${liquidaciones.length} liquidaciones`); } catch {}
+  }
+}
 
 // ===================== HELPERS =====================
 function n(v) { return Number(v) || 0; }
 function r2(v) { return Math.round(v * 100) / 100; }
 
-function getConfig() {
-  const rows = db.prepare("SELECT key, value FROM config").all();
-  const cfg = {};
-  for (const r of rows) cfg[r.key] = JSON.parse(r.value);
-  return cfg;
-}
-
-function saveConfig(cfg) {
-  const upsert = db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)");
-  const tx = db.transaction(() => {
-    for (const [k, v] of Object.entries(cfg)) upsert.run(k, JSON.stringify(v));
-  });
-  tx();
-}
-
-// ===================== FORMULAS EXCEL =====================
+// ===================== FORMULAS =====================
 function calcularLiquidacion(datos) {
-  const config = getConfig();
   const E7 = n(datos["PESO BRUTO"]);
   const E8 = n(datos["TARA"]);
   const E9 = E7 - E8;
@@ -204,7 +155,7 @@ function authMiddleware(req, res, next) {
 
 app.post("/api/login", (req, res) => {
   const { user, pass } = req.body;
-  const u = db.prepare("SELECT * FROM users WHERE user = ? AND pass = ?").get(user, pass);
+  const u = users.find(u => u.user === user && u.pass === pass);
   if (!u) return res.status(401).json({ error: "Credenciales incorrectas" });
   const token = jwt.sign({ user: u.user }, JWT_SECRET, { expiresIn: "24h" });
   res.json({ ok: true, token, user: u.user });
@@ -213,41 +164,38 @@ app.post("/api/login", (req, res) => {
 app.get("/api/verify", authMiddleware, (req, res) => res.json({ ok: true }));
 
 app.get("/api/users", authMiddleware, (req, res) => {
-  const users = db.prepare("SELECT user FROM users").all();
-  res.json(users);
+  res.json(users.map(u => ({ user: u.user })));
 });
 
 app.post("/api/users", authMiddleware, (req, res) => {
   const { user, pass } = req.body;
   if (!user || !pass) return res.status(400).json({ error: "user y pass requeridos" });
-  try {
-    db.prepare("INSERT INTO users (user, pass) VALUES (?, ?)").run(user, pass);
-    res.status(201).json({ ok: true });
-  } catch (e) {
-    res.status(409).json({ error: "Usuario ya existe" });
-  }
+  if (users.find(u => u.user === user)) return res.status(409).json({ error: "Usuario ya existe" });
+  users.push({ user, pass });
+  saveJSON(USERS_FILE, users);
+  res.status(201).json({ ok: true });
 });
 
 app.delete("/api/users/:user", authMiddleware, (req, res) => {
-  const r = db.prepare("DELETE FROM users WHERE user = ?").run(req.params.user);
-  if (r.changes === 0) return res.status(404).json({ error: "No encontrado" });
+  const idx = users.findIndex(u => u.user === req.params.user);
+  if (idx === -1) return res.status(404).json({ error: "No encontrado" });
+  users.splice(idx, 1);
+  saveJSON(USERS_FILE, users);
   res.json({ ok: true });
 });
 
 // ===================== CONFIG =====================
-app.get("/api/config", authMiddleware, (req, res) => res.json(getConfig()));
+app.get("/api/config", authMiddleware, (req, res) => res.json(config));
 app.put("/api/config", authMiddleware, (req, res) => {
-  saveConfig(req.body);
-  res.json({ ok: true, config: getConfig() });
+  config = req.body;
+  saveJSON(CONFIG_FILE, config);
+  res.json({ ok: true, config });
 });
 
 // ===================== LIQUIDACIONES =====================
 app.get("/api/liquidaciones", authMiddleware, (req, res) => {
   const { busqueda, fecha_desde, fecha_hasta } = req.query;
-  let rows = db.prepare("SELECT * FROM liquidaciones ORDER BY fecha_registro DESC").all();
-  let items = rows.map(r => {
-    try { return JSON.parse(r.data); } catch { return null; }
-  }).filter(Boolean);
+  let items = [...liquidaciones];
 
   if (busqueda) {
     const q = busqueda.toLowerCase();
@@ -259,57 +207,59 @@ app.get("/api/liquidaciones", authMiddleware, (req, res) => {
   }
   if (fecha_desde) items = items.filter(l => l["FECHA DE ENTREGA"] >= fecha_desde);
   if (fecha_hasta) items = items.filter(l => l["FECHA DE ENTREGA"] <= fecha_hasta);
-  res.json(items);
+  res.json(items.sort((a, b) => (b.fecha_registro || "").localeCompare(a.fecha_registro || "")));
 });
 
 app.get("/api/liquidaciones/:id", authMiddleware, (req, res) => {
-  const row = db.prepare("SELECT data FROM liquidaciones WHERE id = ?").get(req.params.id);
-  if (!row) return res.status(404).json({ error: "No encontrada" });
-  res.json(JSON.parse(row.data));
+  const l = liquidaciones.find(l => l.id === req.params.id);
+  if (!l) return res.status(404).json({ error: "No encontrada" });
+  res.json(l);
 });
 
 app.post("/api/liquidaciones", authMiddleware, (req, res) => {
   const r = calcularLiquidacion(req.body);
-  db.prepare("INSERT INTO liquidaciones (id, data, fecha_registro) VALUES (?, ?, ?)").run(r.id, JSON.stringify(r), r.fecha_registro);
+  liquidaciones.push(r);
+  saveJSON(LIQS_FILE, liquidaciones);
   res.status(201).json(r);
 });
 
 app.put("/api/liquidaciones/:id", authMiddleware, (req, res) => {
-  const exists = db.prepare("SELECT id FROM liquidaciones WHERE id = ?").get(req.params.id);
-  if (!exists) return res.status(404).json({ error: "No encontrada" });
+  const idx = liquidaciones.findIndex(l => l.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "No encontrada" });
   const r = calcularLiquidacion({ ...req.body, id: req.params.id });
-  db.prepare("UPDATE liquidaciones SET data = ?, fecha_registro = ? WHERE id = ?").run(JSON.stringify(r), r.fecha_registro, req.params.id);
+  liquidaciones[idx] = r;
+  saveJSON(LIQS_FILE, liquidaciones);
   res.json(r);
 });
 
 app.delete("/api/liquidaciones/:id", authMiddleware, (req, res) => {
-  const r = db.prepare("DELETE FROM liquidaciones WHERE id = ?").run(req.params.id);
-  if (r.changes === 0) return res.status(404).json({ error: "No encontrada" });
+  const idx = liquidaciones.findIndex(l => l.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "No encontrada" });
+  liquidaciones.splice(idx, 1);
+  saveJSON(LIQS_FILE, liquidaciones);
   res.json({ ok: true });
 });
 
 app.get("/api/resumen", authMiddleware, (req, res) => {
-  const rows = db.prepare("SELECT data FROM liquidaciones").all();
-  const items = rows.map(r => { try { return JSON.parse(r.data); } catch { return null; } }).filter(Boolean);
-  const t = items.length;
-  const pag = items.reduce((s, l) => s + (l["LIQUIDO PAGABLE [Bs]"] || 0), 0);
-  const ret = items.reduce((s, l) => s + (l["TOTAL RETENCION"] || 0), 0);
-  const min = items.reduce((s, l) => s + (l["VAL MIN BS"] || 0), 0);
-  const prod = [...new Set(items.map(l => l["NOMBRE Y APELLIDO"]))];
+  const t = liquidaciones.length;
+  const pag = liquidaciones.reduce((s, l) => s + (l["LIQUIDO PAGABLE [Bs]"] || 0), 0);
+  const ret = liquidaciones.reduce((s, l) => s + (l["TOTAL RETENCION"] || 0), 0);
+  const min = liquidaciones.reduce((s, l) => s + (l["VAL MIN BS"] || 0), 0);
+  const prod = [...new Set(liquidaciones.map(l => l["NOMBRE Y APELLIDO"]))];
   res.json({ total: t, pagable: r2(pag), retenciones: r2(ret), mineral: r2(min), productores: prod.length });
 });
 
 // ===================== IMPRESION =====================
 app.get("/api/liquidaciones/:id/imprimir", authMiddleware, (req, res) => {
-  const row = db.prepare("SELECT data FROM liquidaciones WHERE id = ?").get(req.params.id);
-  if (!row) return res.status(404).send("No encontrada");
-  res.type("text/html").send(htmlLiquidacion(JSON.parse(row.data)));
+  const l = liquidaciones.find(l => l.id === req.params.id);
+  if (!l) return res.status(404).send("No encontrada");
+  res.type("text/html").send(htmlLiquidacion(l));
 });
 
 app.get("/api/liquidaciones/:id/texto", authMiddleware, (req, res) => {
-  const row = db.prepare("SELECT data FROM liquidaciones WHERE id = ?").get(req.params.id);
-  if (!row) return res.status(404).send("No encontrada");
-  res.type("text/plain").send(textoPlano(JSON.parse(row.data)));
+  const l = liquidaciones.find(l => l.id === req.params.id);
+  if (!l) return res.status(404).send("No encontrada");
+  res.type("text/plain").send(textoPlano(l));
 });
 
 function f(n) { return Number(n || 0).toLocaleString("es-BO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
