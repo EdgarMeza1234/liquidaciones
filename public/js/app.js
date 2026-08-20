@@ -12,9 +12,9 @@ createApp({
     function showToast(m, t = "success") { toast.message = m; toast.type = t; toast.show = true; setTimeout(() => toast.show = false, 3000); }
 
     // ===================== AUTH =====================
-    const token = ref(localStorage.getItem("liq_token") || "");
-    const currentUser = ref(localStorage.getItem("liq_user") || "");
-    const authenticated = ref(false);
+    const token = ref("no-auth");
+    const currentUser = ref("admin");
+    const authenticated = ref(true);
     const loginForm = reactive({ user: "", pass: "" });
     const loginError = ref("");
     const loggingIn = ref(false);
@@ -184,8 +184,9 @@ createApp({
     }
 
     onMounted(async () => {
-      const ok = await checkAuth();
-      if (ok) { await cargarCfg(); await cargarHistorial(); await cargarRes(); }
+      await cargarCfg();
+      await cargarHistorial();
+      await cargarRes();
     });
 
     return {

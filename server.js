@@ -137,28 +137,12 @@ function calcularLiquidacion(datos) {
 
 // ===================== AUTH =====================
 function authMiddleware(req, res, next) {
-  let token = null;
-  const auth = req.headers.authorization;
-  if (auth && auth.startsWith("Bearer ")) {
-    token = auth.split(" ")[1];
-  } else if (req.query && req.query.token) {
-    token = req.query.token;
-  }
-  if (!token) return res.status(401).json({ error: "Token requerido" });
-  try {
-    jwt.verify(token, JWT_SECRET);
-    next();
-  } catch {
-    return res.status(401).json({ error: "Token invalido o expirado" });
-  }
+  next();
 }
 
 app.post("/api/login", (req, res) => {
   const { user, pass } = req.body;
-  const u = users.find(u => u.user === user && u.pass === pass);
-  if (!u) return res.status(401).json({ error: "Credenciales incorrectas" });
-  const token = jwt.sign({ user: u.user }, JWT_SECRET, { expiresIn: "24h" });
-  res.json({ ok: true, token, user: u.user });
+  res.json({ ok: true, token: "no-auth", user: user || "admin" });
 });
 
 app.get("/api/verify", authMiddleware, (req, res) => res.json({ ok: true }));
